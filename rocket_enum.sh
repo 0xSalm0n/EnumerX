@@ -552,9 +552,9 @@ subenum() {
     local duration=$((end_time - start_time))
     
     echo ""
-    echo "+---------------------------------------------+"
-    echo "|           ENUMERATION COMPLETE             |"
-    echo "+---------------------------------------------+"
+    echo "+-------------------------------------------------------------------+"
+    echo "|                   ROCKET ENUMERATION COMPLETE                     |"
+    echo "+-------------------------------------------------------------------+"
     echo "| Domain: $domain"
     echo "| Duration: ${duration}s"
     echo "|"
