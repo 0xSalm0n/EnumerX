@@ -508,6 +508,9 @@ subenum() {
     ##################################
     echo "[*] Advanced information gathering..."
 
+    # Ensure final directory exists
+    mkdir -p "$output_dir/final"
+
     local resolved_file="$output_dir/final/${domain}_final_resolved.txt"
 
     if [ -s "$resolved_file" ]; then
