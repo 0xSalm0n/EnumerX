@@ -496,6 +496,9 @@ subenum() {
         fi
     fi
 
+    # Ensure final directory exists
+    mkdir -p "$output_dir/final"
+    
     # Get final resolved list
     find "$output_dir/resolved" -name "*resolved*${domain}.txt" -type f -exec cat {} + 2>/dev/null \
         | sort -u > "$output_dir/final/${domain}_final_resolved.txt" || true
