@@ -91,11 +91,16 @@ run_subdominator() {
     local output_dir="$2"
     if command -v subdominator >/dev/null 2>&1; then
         echo "[*] === RUNNING SUBDOMINATOR ==="
+        local cfg_arg=""
+        [ -f "$SUBDOMINATOR_CONFIG_PATH" ] && cfg_arg="--config-path $SUBDOMINATOR_CONFIG_PATH"
+
         timeout "$TIMEOUT_PASSIVE_TOOLS" subdominator -d "$domain" \
-            $([ -f "$SUBDOMINATOR_CONFIG_PATH" ] && echo "-c $SUBDOMINATOR_CONFIG_PATH") \
-            -o "$output_dir/passive/subdominator_${domain}.txt" 2>/dev/null || true
+            $cfg_arg \
+            -o "$output_dir/passive/subdominator_${domain}.txt" \
+            >/dev/null 2>&1 || true
     fi
 }
+
 
 # NEW: BBOT (actually produces a domain list)
 run_bbot() {
@@ -391,9 +396,9 @@ subenum() {
     echo "[*] Using $threads threads for concurrent operations"
 
     # Setup directories (Ensure all needed subdirs exist)
-    if ! safe_mkdir "$output_dir"/{passive,active,resolved,final}; then
-        return 1
-    fi
+    # NEW – create all required subdirs in one go
+    mkdir -p "$output_dir"/{passive,active,resolved,final}
+
     
     local tmp_dir
     if ! tmp_dir=$(mktemp -d); then
@@ -403,11 +408,16 @@ subenum() {
     
     # Trap to clean up child processes and temp files
     cleanup() {
-        local main_pid=$$
-        # A compatible way to kill all processes in the group
-        kill 0 2>/dev/null
+        # Kill only this process group; ignore errors
+        kill -- -$$ 2>/dev/null || true
     }
-    trap 'trap - INT TERM EXIT; cleanup' INT TERM EXIT
+    
+    # Only install trap when the script is executed directly, not when sourced
+    if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+        # Trap Ctrl+C and TERM, but NOT normal EXIT
+        trap 'trap - INT TERM; cleanup' INT TERM
+    fi
+
     
     local start_time
     start_time=$(date +%s)
@@ -638,21 +648,28 @@ subenum() {
     # -------------------------------------------------------------------------
     if [[ "$run_stage_dns_records" == true ]]; then
         echo "[*] Starting DNS Record Mining (MX, TXT, SRV)..."
+    
+        mkdir -p "$output_dir/active"
+    
+        local dns_records_file="$output_dir/active/dns_records_${domain}.txt"
+        : > "$dns_records_file"
+    
         if [ -f "$RESOLVERS_PATH" ]; then
-            # Query for MX, NS, TXT, SRV records
             timeout "$TIMEOUT_API" dnsx -d "$domain" -t MX -t NS -t TXT -t SRV -resp -silent -r "$RESOLVERS_PATH" 2>/dev/null \
                 | grep -oE "[a-zA-Z0-9.-]+\.${domain}" \
-                | sort -u > "$output_dir/active/dns_records_${domain}.txt" \
+                | grep -E "^[a-zA-Z0-9.-]+\.${domain}$" \
+                | sort -u > "$dns_records_file" \
                 || echo "[!] DNS Record Mining failed" >&2
-            
-            local dns_rec_count
-            dns_rec_count=$(wc -l < "$output_dir/active/dns_records_${domain}.txt" 2>/dev/null || echo "0")
-            echo "[+] DNS Record Mining found: $dns_rec_count potential subdomains"
         fi
-        
-        # Save checkpoint
+    
+        local dns_rec_count
+        dns_rec_count=$(wc -l < "$dns_records_file" 2>/dev/null || echo "0")
+        echo "[+] DNS Record Mining found: $dns_rec_count potential subdomains"
+    
         echo "LAST_COMPLETED_STAGE='dns_records'" > "$checkpoint_file"
     fi
+
+
 
     # -------------------------------------------------------------------------
     # 8. NEW: ACTIVE RECON (CLOUD & REVERSE DNS)
@@ -680,22 +697,38 @@ subenum() {
 
         # Zone Transfer (AXFR) Check
         if [ -f "$RESOLVERS_PATH" ]; then
-            echo "[*] Running DNS Zone Transfer (AXFR) check..."
-            {
-                # Get NS servers for the domain
-                local ns_servers
-                ns_servers=$(dnsx -d "$domain" -t NS -resp-only -silent -r "$RESOLVERS_PATH" 2>/dev/null)
-                if [ -n "$ns_servers" ]; then
-                    for ns in $ns_servers; do
-                        echo "[*] Trying AXFR against $ns..."
-                        timeout "$TIMEOUT_API" dnsx -d "$domain" -axfr -s "$ns" -silent -r "$RESOLVERS_PATH" 2>/dev/null \
-                            >> "$output_dir/active/axfr_${domain}.txt"
-                    done
-                    sort -u -o "$output_dir/active/axfr_${domain}.txt" "$output_dir/active/axfr_${domain}.txt" \
-                        || echo "[!] AXFR sort failed" >&2
-                fi
-            } & 
+    echo "[*] Running DNS Zone Transfer (AXFR) check..."
+
+    # ✅ make sure the 'active' directory and output file exist
+    mkdir -p "$output_dir/active"
+    local axfr_file="$output_dir/active/axfr_${domain}.txt"
+    : > "$axfr_file"
+
+    {
+        # Get NS servers for the domain (only the NS hostnames, one per line)
+        local ns_servers
+        ns_servers=$(dnsx -d "$domain" -t NS -resp-only -silent -r "$RESOLVERS_PATH" 2>/dev/null \
+            | awk '{print $NF}' \
+            | sed 's/\.$//' \
+            | sort -u)
+
+        if [ -n "$ns_servers" ]; then
+            # Loop over each NS line by line (not word by word)
+            while IFS= read -r ns; do
+                [ -z "$ns" ] && continue
+                echo "[*] Trying AXFR against $ns..."
+                timeout "$TIMEOUT_API" dnsx -d "$domain" -axfr -s "$ns" -silent -r "$RESOLVERS_PATH" 2>/dev/null \
+                    >> "$axfr_file"
+            done <<< "$ns_servers"
+
+            if [ -s "$axfr_file" ]; then
+                sort -u -o "$axfr_file" "$axfr_file" \
+                    || echo "[!] AXFR sort failed" >&2
+            fi
         fi
+    } &
+fi
+
 
         # High-speed DNS bruteforce with puredns
         if command -v puredns >/dev/null 2>&1 && [ -f "$WORDLIST_PATH" ] && [ -f "$RESOLVERS_PATH" ]; then
