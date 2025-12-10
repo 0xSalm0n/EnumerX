@@ -19,7 +19,7 @@ export CENSYS_API_SECRET="your_censys_api_secret_here"
 # --- NEW CONFIGURATION (ADD TO TOP) ---
 export FACEBOOK_APP_ID="your_facebook_app_id_here"
 export FACEBOOK_APP_SECRET="your_facebook_app_secret_here"
-export TIMEOUT_SSL_ENUM="300s" 
+
 
 # Check dependencies (Update your existing check_dependencies function with this list)
 # local required_tools=("subfinder" "assetfinder" "dnsx" "curl" "jq" "gau" "dig" "subdominator" "bbot")
@@ -41,7 +41,30 @@ export TIMEOUT_ACTIVE_TOOLS="1200s"       # For long-running active tools (pured
 export TIMEOUT_PIPELINES="900s"          # For alterx/dnsgen pipelines
 export TIMEOUT_RESOLUTION="900s"         # For final dnsx resolution
 export SUBFINDER_TIMEOUT_FLAG="20"       # For subfinder -timeout flag (just the number)
+export TIMEOUT_SSL_ENUM="300s" 
 # --- End Timeout Configuration ---
+
+
+# -----------------------------------------------------------------------------
+# Global signal handling (install only when script is executed directly)
+# Ensures CTRL+C (SIGINT) or SIGTERM kills all child processes spawned by this script
+# -----------------------------------------------------------------------------
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    global_cleanup() {
+        echo
+        echo "[!] Interrupted — terminating all child processes..."
+        # Try to kill direct children first (graceful)
+        pkill -P $$ 2>/dev/null || true
+        # Then kill the whole process group
+        kill -- -$$ 2>/dev/null || true
+        # Extra aggressive fallback: kill known tool names (in case they detached)
+        pkill -f "amass|dnsx|puredns|massdns|shuffledns|bbot|subfinder|assetfinder|alterx|dnsgen|curl|httpx" 2>/dev/null || true
+        sleep 0.1
+        exit 130
+    }
+
+    trap 'global_cleanup' INT TERM
+fi
 
 
 
@@ -1032,6 +1055,7 @@ sublist() {
     
     cat > "$temp_script" << 'SCRIPT_EOF'
 #!/bin/bash
+trap 'echo "$(date) [!] Worker interrupted (SIGINT/SIGTERM)"; exit 130' INT TERM
 
 # Get the domain from the argument
 domain="$1"
@@ -1339,3 +1363,4 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         esac
     fi
 fi
+
