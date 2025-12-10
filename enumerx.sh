@@ -74,13 +74,13 @@ check_dependencies() {
     local missing_tools=()
     # Added 'dig' because reverse_dns_enumeration relies on it
     local required_tools=("subfinder" "assetfinder" "dnsx" "curl" "jq" "gau" "dig")
-    
+
     for tool in "${required_tools[@]}"; do
         if ! command -v "$tool" >/dev/null 2>&1; then
             missing_tools+=("$tool")
         fi
     done
-    
+
     if [ ${#missing_tools[@]} -ne 0 ]; then
         echo "[!] Missing required tools: ${missing_tools[*]}"
         echo "[!] Please install missing tools before running the script"
@@ -205,37 +205,37 @@ reverse_dns_enumeration() {
 advanced_scraping() {
     local domain="$1"
     local output_dir="$2"
-    
+
     echo "[*] === ADVANCED MULTI-SOURCE SCRAPING ==="
     safe_mkdir "$output_dir/passive/scraping"
-    
+
     # Infrastructure Sources
     timeout "$TIMEOUT_API" curl -sk "https://freeapi.robtex.com/pdns/forward/${domain}" 2>/dev/null \
         | jq -r '.rrname // empty' 2>/dev/null | grep "\.${domain}$" \
         | sort -u > "$output_dir/passive/scraping/robtex.txt" &
-    
+
     timeout "$TIMEOUT_API" curl -sk "https://api.hackertarget.com/hostsearch/?q=${domain}" 2>/dev/null \
         | cut -d',' -f1 | grep "\.${domain}$" \
         | sort -u > "$output_dir/passive/scraping/hackertarget.txt" &
-    
+
     # NEW: ThreatCrowd scraping (fixed)
     timeout "$TIMEOUT_API" curl -sk "https://www.threatcrowd.org/searchApi/v2/domain/report/?domain=${domain}" 2>/dev/null \
         | jq -r '.subdomains[]? // empty' 2>/dev/null \
         | grep -E "\.${domain}$" \
         | sort -u > "$output_dir/passive/scraping/threatcrowd.txt" &
 
-    
+
     # Search Engine Scraping (Note: High chance of Captcha/Block without proxies)
     timeout "$TIMEOUT_API" curl -sk "https://www.google.com/search?q=site:*.${domain}&num=100" \
         -H "User-Agent: Mozilla/5.0" 2>/dev/null \
         | grep -oE "[a-zA-Z0-9.-]+\.${domain}" \
         | sort -u > "$output_dir/passive/scraping/google.txt" &
-    
+
     timeout "$TIMEOUT_API" curl -sk "https://www.bing.com/search?q=site:*.${domain}&count=50" \
         -H "User-Agent: Mozilla/5.0" 2>/dev/null \
         | grep -oE "[a-zA-Z0-9.-]+\.${domain}" \
         | sort -u > "$output_dir/passive/scraping/bing.txt" &
-    
+
     # Facebook CT
     if [ -n "$FACEBOOK_APP_ID" ] && [ -n "$FACEBOOK_APP_SECRET" ] && [[ ! "$FACEBOOK_APP_ID" == "your_"* ]]; then
         local fb_token="${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}"
@@ -244,9 +244,9 @@ advanced_scraping() {
             | jq -r '.data[]?.domains[]? // empty' 2>/dev/null \
             | grep "\.${domain}$" | sort -u > "$output_dir/passive/scraping/facebook_ct.txt" &
     fi
-    
+
     wait
-    
+
     cat "$output_dir/passive/scraping"/*.txt 2>/dev/null | grep -E "[a-zA-Z0-9.-]+" | sort -u > "$output_dir/passive/advanced_scraping_${domain}.txt"
     echo "[+] Multi-Source Scraping: $(wc -l < "$output_dir/passive/advanced_scraping_${domain}.txt" 2>/dev/null || echo 0) results"
 }
@@ -265,18 +265,18 @@ subenum() {
         echo "[!] Usage: subenum <domain> [threads] <output_directory>"
         return 1
     fi
-    
+
     # Validate domain format
     if ! validate_domain "$domain"; then
         return 1
     fi
-    
+
     # Validate thread count
     if ! [[ "$threads" =~ ^[0-9]+$ ]] || [ "$threads" -lt 1 ] || [ "$threads" -gt 1000 ]; then
         echo "[!] Invalid thread count. Must be between 1-1000"
         return 1
     fi
-    
+
     # Resource Exhaustion Check
     local max_procs
     max_procs=$(nproc 2>/dev/null || echo 4) # Default to 4 if nproc fails
@@ -288,7 +288,7 @@ subenum() {
         # echo
         # if [[ ! $REPLY =~ ^[Yy]$ ]]; then return 1; fi
     fi
-    
+
     # Check dependencies
     if ! check_dependencies; then
         return 1
@@ -305,7 +305,7 @@ subenum() {
     # Checkpoint handling
     local checkpoint_file="$output_dir/.checkpoint"
     local resume_from_stage=""
-    
+
     if [ -f "$checkpoint_file" ]; then
         # Check if we are in bulk mode (silent resume) or manual mode
         if [[ "$output_dir" == *"bulk_"* ]]; then
@@ -322,7 +322,7 @@ subenum() {
             fi
         fi
     fi
-    
+
     # --- WATERFALL LOGIC (UPDATED WITH NEW STAGES) ---
     local run_stage_passive_nonapi=true
     local run_stage_advanced_passive=true  # NEW: Subdominator & Scraping
@@ -422,26 +422,26 @@ subenum() {
     # NEW – create all required subdirs in one go
     mkdir -p "$output_dir"/{passive,active,resolved,final}
 
-    
+
     local tmp_dir
     if ! tmp_dir=$(mktemp -d); then
         echo "[!] Failed to create temporary directory"
         return 1
     fi
-    
+
     # Trap to clean up child processes and temp files
     cleanup() {
         # Kill only this process group; ignore errors
         kill -- -$$ 2>/dev/null || true
     }
-    
+
     # Only install trap when the script is executed directly, not when sourced
     if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         # Trap Ctrl+C and TERM, but NOT normal EXIT
         trap 'trap - INT TERM; cleanup' INT TERM
     fi
 
-    
+
     local start_time
     start_time=$(date +%s)
 
@@ -457,7 +457,7 @@ subenum() {
             local domain="$2"
             local output_dir="$3"
             local threads="$4"
-            
+
             case "$source" in
                 "subfinder")
                     if command -v subfinder >/dev/null 2>&1; then
@@ -516,15 +516,15 @@ subenum() {
 
         export -f run_nonapi_passive_enum
         local nonapi_sources=("subfinder" "assetfinder" "amass" "findomain" "chaos" "gau" "crtsh")
-        
+
         for source in "${nonapi_sources[@]}"; do
             run_nonapi_passive_enum "$source" "$domain" "$output_dir" "$threads" &
         done
-        
+
         echo "[*] Waiting for non-API passive enumeration to complete..."
         wait
         echo "[+] Non-API passive enumeration complete"
-        
+
         # Save checkpoint
         echo "LAST_COMPLETED_STAGE='passive_nonapi'" > "$checkpoint_file"
     fi
@@ -534,11 +534,11 @@ subenum() {
     # -------------------------------------------------------------------------
     if [[ "$run_stage_advanced_passive" == true ]]; then
         echo "[*] Starting Advanced Passive Modules..."
-        
+
         # Run these in background parallel to save time
         run_subdominator "$domain" "$output_dir" &
         advanced_scraping "$domain" "$output_dir" &
-        
+
         wait
         echo "LAST_COMPLETED_STAGE='advanced_passive'" > "$checkpoint_file"
     fi
@@ -549,7 +549,7 @@ subenum() {
     if [[ "$run_stage_ssl_enum" == true ]]; then
         # This function spawns its own background jobs, so we call it directly
         ssl_cert_enumeration "$domain" "$output_dir"
-        
+
         echo "LAST_COMPLETED_STAGE='ssl_enum'" > "$checkpoint_file"
     fi
 
@@ -563,7 +563,7 @@ subenum() {
             local api_name="$1"
             local domain="$2"
             local output_dir="$3"
-            
+
             case "$api_name" in
                 "virustotal")
                     if [ -n "$VIRUSTOTAL_API_KEY" ] && [[ ! "$VIRUSTOTAL_API_KEY" == "your_"* ]]; then
@@ -599,7 +599,7 @@ subenum() {
                         : > "$output_dir/passive/shodan_${domain}.txt"
                     fi
                     ;;
-                
+
                 "github")
                     if [ -n "$GITHUB_TOKEN" ] && [[ ! "$GITHUB_TOKEN" == "your_"* ]]; then
                         echo "[*] Running GitHub API..."
@@ -640,13 +640,13 @@ subenum() {
         }
 
         local api_sources=("virustotal" "securitytrails" "shodan" "github" "urlscan" "censys" "alienvault")
-        
+
         for api_source in "${api_sources[@]}"; do
             run_api_enum "$api_source" "$domain" "$output_dir"
             echo "[*] Waiting 1 second before next API call..."
             sleep 1
         done
-        
+
         # Save checkpoint
         echo "LAST_COMPLETED_STAGE='passive_api'" > "$checkpoint_file"
     fi
@@ -671,12 +671,12 @@ subenum() {
     # -------------------------------------------------------------------------
     if [[ "$run_stage_dns_records" == true ]]; then
         echo "[*] Starting DNS Record Mining (MX, TXT, SRV)..."
-    
+
         mkdir -p "$output_dir/active"
-    
+
         local dns_records_file="$output_dir/active/dns_records_${domain}.txt"
         : > "$dns_records_file"
-    
+
         if [ -f "$RESOLVERS_PATH" ]; then
             timeout "$TIMEOUT_API" dnsx -d "$domain" -t MX -t NS -t TXT -t SRV -resp -silent -r "$RESOLVERS_PATH" 2>/dev/null \
                 | grep -oE "[a-zA-Z0-9.-]+\.${domain}" \
@@ -684,11 +684,11 @@ subenum() {
                 | sort -u > "$dns_records_file" \
                 || echo "[!] DNS Record Mining failed" >&2
         fi
-    
+
         local dns_rec_count
         dns_rec_count=$(wc -l < "$dns_records_file" 2>/dev/null || echo "0")
         echo "[+] DNS Record Mining found: $dns_rec_count potential subdomains"
-    
+
         echo "LAST_COMPLETED_STAGE='dns_records'" > "$checkpoint_file"
     fi
 
@@ -699,14 +699,14 @@ subenum() {
     # -------------------------------------------------------------------------
     if [[ "$run_stage_active_recon" == true ]]; then
         echo "[*] Starting Active Reconnaissance Modules..."
-        
+
         # Ensure active directory exists
         mkdir -p "$output_dir/active"
-        
+
         # Run Cloud Recon and Reverse DNS in parallel
         cloud_recon "$domain" "$output_dir" &
         reverse_dns_enumeration "$domain" "$output_dir" &
-        
+
         wait
         echo "LAST_COMPLETED_STAGE='active_recon'" > "$checkpoint_file"
     fi
@@ -714,43 +714,37 @@ subenum() {
     # -------------------------------------------------------------------------
     # 9. ACTIVE ENUMERATION & BRUTEFORCE
     # -------------------------------------------------------------------------
-    if [[ "$run_stage_active_enum" == true ]]; then
-        echo "[*] Starting Active Enumeration..."
-        mkdir -p "$output_dir/active"
-
-        # Zone Transfer (AXFR) Check
-        if [ -f "$RESOLVERS_PATH" ]; then
+    # Zone Transfer (AXFR) Check using dnsx
+if [ -f "$RESOLVERS_PATH" ]; then
     echo "[*] Running DNS Zone Transfer (AXFR) check..."
 
-    # ✅ make sure the 'active' directory and output file exist
     mkdir -p "$output_dir/active"
     local axfr_file="$output_dir/active/axfr_${domain}.txt"
     : > "$axfr_file"
 
-    {
-        # Get NS servers for the domain (only the NS hostnames, one per line)
-        local ns_servers
-        ns_servers=$(dnsx -d "$domain" -t NS -resp-only -silent -r "$RESOLVERS_PATH" 2>/dev/null \
-            | awk '{print $NF}' \
-            | sed 's/\.$//' \
-            | sort -u)
+    # Get NS servers for the domain (via dig - reliable)
+    local ns_servers
+    ns_servers=$(dig +short NS "$domain" 2>/dev/null | sed 's/\.$//' | sort -u)
 
-        if [ -n "$ns_servers" ]; then
-            # Loop over each NS line by line (not word by word)
-            while IFS= read -r ns; do
-                [ -z "$ns" ] && continue
-                echo "[*] Trying AXFR against $ns..."
-                timeout "$TIMEOUT_API" dnsx -d "$domain" -axfr -s "$ns" -silent -r "$RESOLVERS_PATH" 2>/dev/null \
-                    >> "$axfr_file"
-            done <<< "$ns_servers"
+    if [ -n "$ns_servers" ]; then
+        echo "$ns_servers" | while IFS= read -r ns; do
+            [ -z "$ns" ] && continue
 
-            if [ -s "$axfr_file" ]; then
-                sort -u -o "$axfr_file" "$axfr_file" \
-                    || echo "[!] AXFR sort failed" >&2
-            fi
-        fi
-    } &
+            echo "[*] Trying AXFR with dnsx against $ns..."
+
+            # dnsx AXFR صحیح format → "domain@nameserver"
+            echo "${domain}@${ns}" | \
+                timeout "$TIMEOUT_API" dnsx -axfr -silent 2>/dev/null \
+                >> "$axfr_file"
+
+        done
+    fi
+
+    if [ -s "$axfr_file" ]; then
+        sort -u -o "$axfr_file" "$axfr_file"
+    fi
 fi
+
 
 
         # High-speed DNS bruteforce with puredns
@@ -796,7 +790,7 @@ fi
         # BBOT is heavy and resource intensive, run sequentially
         # Note: run_bbot saves to output_dir/active/bbot_${domain}.txt
         run_bbot "$domain" "$output_dir"
-        
+
         echo "LAST_COMPLETED_STAGE='bbot_stage'" > "$checkpoint_file"
     fi
 
@@ -813,7 +807,7 @@ fi
             | grep -E "^[a-zA-Z0-9.-]+\.${domain}$" \
             | sort -u > "$base_domains" \
             || echo "[!] Failed to create combined seed list" >&2
-        
+
         local seed_count
         seed_count=$(wc -l < "$base_domains" 2>/dev/null || echo "0")
         echo "[+] Using $seed_count combined subdomains as seeds for permutation"
@@ -857,7 +851,7 @@ fi
     #         | grep -E "^[a-zA-Z0-9.-]+\.${domain}$" \
     #         | sed 's/\*\.//g' \
     #         | sort -u > "$output_dir/active/ct_fallback_${domain}.txt" &
-        
+
     #     wait
     #     echo "LAST_COMPLETED_STAGE='ct_logs'" > "$checkpoint_file"
     # fi
@@ -866,7 +860,7 @@ fi
     # 13. MERGE ALL RESULTS
     # -------------------------------------------------------------------------
     echo "[*] Merging all enumeration results..."
-    
+
     find "$output_dir" -name "*_${domain}.txt" -type f -exec cat {} + 2>/dev/null \
         | grep -E "^[a-zA-Z0-9.-]+\.${domain}$" \
         | grep -v "^\*\." \
@@ -899,7 +893,7 @@ fi
                 || echo "[!] dnsx resolve failed" >&2
         fi
     fi
-    
+
     # Get final resolved list
     find "$output_dir/resolved" -name "*resolved*${domain}.txt" -type f -exec cat {} + 2>/dev/null \
         | sort -u > "$output_dir/final/${domain}_final_resolved.txt" \
@@ -935,7 +929,7 @@ fi
     local end_time
     end_time=$(date +%s)
     local duration=$((end_time - start_time))
-    
+
     echo ""
     echo "+-------------------------------------------------------------------+"
     echo "|                   ROCKET ENUMERATION COMPLETE                     |"
@@ -949,12 +943,12 @@ fi
     total_found=$(wc -l < "$output_dir/all_subdomains_${domain}.txt" 2>/dev/null || echo "0")
     local resolved_count
     resolved_count=$(wc -l < "$output_dir/final/${domain}_final_resolved.txt" 2>/dev/null || echo "0")
-    
+
     local ip_count=0
     if [ -f "$output_dir/final/${domain}_ips.txt" ]; then
         ip_count=$(wc -l < "$output_dir/final/${domain}_ips.txt" 2>/dev/null || echo "0")
     fi
-    
+
     echo "| • Total subdomains found: $total_found"
     echo "| • Resolved subdomains: $resolved_count"
     echo "| • Unique IP addresses: $ip_count"
@@ -966,7 +960,7 @@ fi
     # Cleanup
     rm -rf "$tmp_dir"
     rm -f "$checkpoint_file"
-    
+
     # Save Summary
     cat > "$output_dir/SUMMARY_${domain}.txt" << EOF
 Subdomain Enumeration Summary for $domain
@@ -977,7 +971,7 @@ Threads: $threads
 
 Results:
 - Total subdomains found: $total_found
-- Resolved subdomains: $resolved_count  
+- Resolved subdomains: $resolved_count
 - Unique IP addresses: $ip_count
 
 Key Files:
@@ -999,7 +993,7 @@ sublist() {
     local domain_list="$1"
     local parallel_jobs="${2:-5}"
     local threads_per_domain="${3:-50}"
-    
+
     if [ ! -f "$domain_list" ]; then
         echo "[!] Usage: sublist <domain_list_file> [parallel_jobs] [threads_per_domain]"
         echo "[!] Example: sublist domains.txt 10 30"
@@ -1012,7 +1006,7 @@ sublist() {
         echo "[!] Invalid parallel jobs count. Must be between 1-20"
         return 1
     fi
-    
+
     if ! [[ "$threads_per_domain" =~ ^[0-9]+$ ]] || [ "$threads_per_domain" -lt 1 ] || [ "$threads_per_domain" -gt 200 ]; then
         echo "[!] Invalid threads per domain. Must be between 1-200"
         return 1
@@ -1022,7 +1016,7 @@ sublist() {
     echo "[*] Domain list: $domain_list"
     echo "[*] Parallel jobs: $parallel_jobs"
     echo "[*] Threads per domain: $threads_per_domain"
-    
+
     # Create main results directory with timestamp
     local timestamp
     timestamp=$(date +"%Y%m%d_%H%M%S")
@@ -1030,29 +1024,29 @@ sublist() {
     if ! safe_mkdir "$main_output_dir"; then
         return 1
     fi
-    
+
     main_output_dir=$(readlink -f "$main_output_dir")
-    
+
     # Count total domains
     local total_domains
     total_domains=$(grep -v "^#" "$domain_list" | grep -v "^$" | wc -l)
     echo "[*] Total domains to process: $total_domains"
-    
+
     # Start time tracking
     local bulk_start_time
     bulk_start_time=$(date +%s)
-    
+
     # Create progress tracking files
     local progress_file="$main_output_dir/.progress"
     local failed_domains="$main_output_dir/failed_domains.txt"
     local completed_domains="$main_output_dir/completed_domains.txt"
-    
+
     touch "$progress_file" "$failed_domains" "$completed_domains"
-    
+
     # Create a temporary script for the parallel execution
     local temp_script
     temp_script=$(mktemp)
-    
+
     cat > "$temp_script" << 'SCRIPT_EOF'
 #!/bin/bash
 trap 'echo "$(date) [!] Worker interrupted (SIGINT/SIGTERM)"; exit 130' INT TERM
@@ -1096,13 +1090,13 @@ fi
 SCRIPT_EOF
 
     chmod +x "$temp_script"
-    
+
     # Progress monitoring function
     monitor_progress() {
         local main_dir="$1"
         local total="$2"
         local progress_file="$3"
-        
+
         while [ -f "$progress_file" ]; do
             if [ -f "$main_dir/completed_domains.txt" ] && [ -f "$main_dir/failed_domains.txt" ]; then
                 local completed
@@ -1110,7 +1104,7 @@ SCRIPT_EOF
                 completed=$(wc -l < "$main_dir/completed_domains.txt" 2>/dev/null || echo "0")
                 failed=$(wc -l < "$main_dir/failed_domains.txt" 2>/dev/null || echo "0")
                 local processed=$((completed + failed))
-                
+
                 if [ "$processed" -gt 0 ] && [ "$total" -gt 0 ]; then
                     local percentage=$((processed * 100 / total))
                     echo "[*] Progress: $processed/$total domains processed ($percentage%) - Completed: $completed, Failed: $failed"
@@ -1119,49 +1113,49 @@ SCRIPT_EOF
             sleep 10
         done
     }
-    
+
     # Start progress monitor in background
     monitor_progress "$main_output_dir" "$total_domains" "$progress_file" &
     local monitor_pid=$!
-    
+
     echo "[*] Starting parallel enumeration..."
-    
+
     # Get the absolute path of the script to pass to xargs
     local script_full_path
     script_full_path=$(readlink -f "${BASH_SOURCE[0]}")
-    
+
     # Process domains in parallel with enhanced monitoring
     grep -v "^#" "$domain_list" | grep -v "^$" | \
     xargs -P "$parallel_jobs" -I {} "$temp_script" {} "$threads_per_domain" "$main_output_dir" "$progress_file" "$failed_domains" "$completed_domains" "$script_full_path"
-    
+
     local bulk_exit_code=$?
-    
+
     # Stop progress monitor
     rm -f "$progress_file"
     kill $monitor_pid 2>/dev/null
     wait $monitor_pid 2>/dev/null
-    
+
     # Cleanup temporary script
     rm -f "$temp_script"
-    
+
     # Calculate bulk processing time
     local bulk_end_time
     bulk_end_time=$(date +%s)
     local bulk_duration=$((bulk_end_time - bulk_start_time))
-    
+
     # Create bulk summary
     local completed_count
     local failed_count
     completed_count=$(wc -l < "$completed_domains" 2>/dev/null || echo "0")
     failed_count=$(wc -l < "$failed_domains" 2>/dev/null || echo "0")
-    
+
     # Calculate total subdomains found across all domains
     local total_subdomains=0
     local total_resolved=0
     local total_ips=0
-    
+
     echo "[*] Calculating statistics across all domains..."
-    
+
     for result_dir in "$main_output_dir"/*-results; do
         if [ -d "$result_dir" ]; then
             # Count subdomains
@@ -1170,14 +1164,14 @@ SCRIPT_EOF
                 domain_subs=$(cat "$result_dir/all_subdomains_"*.txt 2>/dev/null | wc -l || echo "0")
                 total_subdomains=$((total_subdomains + domain_subs))
             fi
-            
+
             # Count resolved
             if [ -f "$result_dir/final/"*"_final_resolved.txt" ]; then
                 local domain_resolved
                 domain_resolved=$(cat "$result_dir/final/"*"_final_resolved.txt" 2>/dev/null | wc -l || echo "0")
                 total_resolved=$((total_resolved + domain_resolved))
             fi
-            
+
             # Count IPs
             if [ -f "$result_dir/final/"*"_ips.txt" ]; then
                 local domain_ips
@@ -1186,25 +1180,25 @@ SCRIPT_EOF
             fi
         fi
     done
-    
+
     # Create consolidated results
     echo "[*] Creating consolidated results..."
-    
+
     # ConsolidATE all subdomains
     find "$main_output_dir" -name "all_subdomains_*.txt" -type f -exec cat {} + 2>/dev/null \
         | sort -u > "$main_output_dir/ALL_SUBDOMAINS_CONSOLIDATED.txt" \
         || echo "[!] Failed to consolidate all subdomains" >&2
-    
+
     # Consolidate all resolved subdomains
     find "$main_output_dir" -name "*_final_resolved.txt" -type f -exec cat {} + 2>/dev/null \
         | sort -u > "$main_output_dir/ALL_RESOLVED_CONSOLIDATED.txt" \
         || echo "[!] Failed to consolidate all resolved subdomains" >&2
-    
+
     # Consolidate all IPs
     find "$main_output_dir" -name "*_ips.txt" -type f -exec cat {} + 2>/dev/null \
         | sort -u > "$main_output_dir/ALL_IPS_CONSOLIDATED.txt" \
         || echo "[!] Failed to consolidate all IPs" >&2
-    
+
     # Get final consolidated counts
     local consolidated_subs
     local consolidated_resolved
@@ -1212,7 +1206,7 @@ SCRIPT_EOF
     consolidated_subs=$(wc -l < "$main_output_dir/ALL_SUBDOMAINS_CONSOLIDATED.txt" 2>/dev/null || echo "0")
     consolidated_resolved=$(wc -l < "$main_output_dir/ALL_RESOLVED_CONSOLIDATED.txt" 2>/dev/null || echo "0")
     consolidated_ips=$(wc -l < "$main_output_dir/ALL_IPS_CONSOLIDATED.txt" 2>/dev/null || echo "0")
-    
+
     echo ""
     echo "+-------------------------------------------------------------------+"
     echo "|              BULK ENUMERATION COMPLETE                            |"
@@ -1239,7 +1233,7 @@ SCRIPT_EOF
     echo "| Results directory: $main_output_dir"
     echo "+-------------------------------------------------------------------+"
     echo ""
-    
+
     # Create comprehensive bulk summary file
     cat > "$main_output_dir/BULK_SUMMARY.txt" << EOF
 Bulk Subdomain Enumeration Summary
@@ -1286,7 +1280,7 @@ EOF
     if [ "$consolidated_subs" -gt 0 ]; then
         echo "" >> "$main_output_dir/BULK_SUMMARY.txt"
         echo "Top 10 Domains by Subdomain Count:" >> "$main_output_dir/BULK_SUMMARY.txt"
-        
+
         for result_dir in "$main_output_dir"/*-results; do
             if [ -d "$result_dir" ]; then
                 local domain_name
@@ -1301,16 +1295,16 @@ EOF
     echo "[+] Bulk summary saved to: $main_output_dir/BULK_SUMMARY.txt"
     echo "[+] Consolidated results available in:"
     echo "    - $main_output_dir/ALL_SUBDOMAINS_CONSOLIDATED.txt"
-    echo "    - $main_output_dir/ALL_RESOLVED_CONSOLIDATED.txt" 
+    echo "    - $main_output_dir/ALL_RESOLVED_CONSOLIDATED.txt"
     echo "    - $main_output_dir/ALL_IPS_CONSOLIDATED.txt"
-    
+
     if [ $bulk_exit_code -eq 0 ]; then
         echo "[+] Bulk enumeration completed successfully"
     else
         echo "[!] Bulk enumeration completed with some failures"
         echo "[!] Check $main_output_dir/failed_domains.txt for failed domains"
     fi
-    
+
     return $bulk_exit_code
 }
 
@@ -1339,7 +1333,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "    ./rocket_enum.sh subenum example.com 100"
     echo ""
     echo "[!] SECURITY WARNING: Remove API keys before sharing this script"
-    
+
     # Check if function was called directly
     if [ $# -gt 0 ]; then
         case "$1" in
@@ -1363,4 +1357,3 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         esac
     fi
 fi
-
