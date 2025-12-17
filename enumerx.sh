@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 # Advanced Subdomain Enumeration Script
-# Author: [Salmon Kumar/MrRockettt]
-# Repository: [https://github.com/MrRockettt/rocket-enum]
+# Author: [Salmon Kumar/0xSalm0n]
+# Repository: [https://github.com/0xSalm0n/EnumerX]
 #
 # Description: Comprehensive subdomain enumeration tool combining
 # multiple passive and active reconnaissance techniques
