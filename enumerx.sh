@@ -69,11 +69,9 @@ fi
 
 
 # Function to check if required tools are installed
-# Updated check_dependencies function
 check_dependencies() {
     local missing_tools=()
-    # Added 'dig' because reverse_dns_enumeration relies on it
-    local required_tools=("subfinder" "assetfinder" "dnsx" "curl" "jq" "gau" "dig")
+    local required_tools=("subfinder" "assetfinder" "dnsx" "curl" "jq" "gau" "dig" "bbot" "subdominator" "puredns" "shuffledns" "massdns" "alterx" "dnsgen")
 
     for tool in "${required_tools[@]}"; do
         if ! command -v "$tool" >/dev/null 2>&1; then
@@ -651,6 +649,7 @@ subenum() {
         echo "LAST_COMPLETED_STAGE='passive_api'" > "$checkpoint_file"
     fi
 
+
     # -------------------------------------------------------------------------
     # 6. MERGE PASSIVE RESULTS
     # -------------------------------------------------------------------------
@@ -665,6 +664,28 @@ subenum() {
     local passive_count
     passive_count=$(wc -l < "$output_dir/passive_all_${domain}.txt" 2>/dev/null || echo "0")
     echo "[+] Passive enumeration found: $passive_count subdomains"
+
+
+    # -------------------------------------------------------------------------
+    # 6.5 INTERMEDIATE RESOLUTION (The "Fail-Fast" Fix)
+    # -------------------------------------------------------------------------
+    echo "[*] Resolving passive results to clean up permutation seeds..."
+    mkdir -p "$output_dir/resolved"
+    
+    local passive_merged="$output_dir/passive_all_${domain}.txt"
+    local valid_passive="$output_dir/resolved/valid_passive_${domain}.txt"
+
+    # Use Puredns for wildcard filtering and resolution
+    if command -v puredns >/dev/null 2>&1; then
+        puredns resolve "$passive_merged" -r "$RESOLVERS_PATH" --write "$valid_passive" \
+            --rate-limit 1000 --wildcard-tests 10 2>/dev/null
+    else
+        # Fallback to dnsx if puredns is missing
+        cat "$passive_merged" | dnsx -silent -r "$RESOLVERS_PATH" -resp-only -o "$valid_passive" 2>/dev/null
+    fi
+
+    local valid_count=$(wc -l < "$valid_passive" 2>/dev/null || echo "0")
+    echo "[+] Validated passive subdomains: $valid_count (used for permutation seeds)"
 
     # -------------------------------------------------------------------------
     # 7. DNS RECORD MINING
@@ -762,15 +783,21 @@ subenum() {
         # Fast DNS resolution with massdns (Secondary check)
         if command -v massdns >/dev/null 2>&1 && [ -f "$WORDLIST_PATH" ] && [ -f "$RESOLVERS_PATH" ]; then
             echo "[*] Running massdns bruteforce (Top 100k)..."
-            {
-                head -100000 "$WORDLIST_PATH" | sed "s/$/.$domain/" \
-                    | timeout "$TIMEOUT_ACTIVE_TOOLS" massdns -r "$RESOLVERS_PATH" -t A -o S -w "$tmp_dir/massdns_raw.txt" 2>/dev/null \
-                    || echo "[!] massdns failed" >&2
-                if [ -f "$tmp_dir/massdns_raw.txt" ]; then
-                    awk '{print $1}' "$tmp_dir/massdns_raw.txt" | sed 's/\.$//' \
-                        > "$output_dir/active/massdns_${domain}.txt"
-                fi
-            } &
+            
+            # Generate target list
+            head -100000 "$WORDLIST_PATH" | sed "s/$/.$domain/" > "$tmp_dir/massdns_input.txt"
+            
+            # Run Massdns
+            timeout "$TIMEOUT_ACTIVE_TOOLS" massdns -r "$RESOLVERS_PATH" -t A -o S \
+                -w "$tmp_dir/massdns_raw.txt" "$tmp_dir/massdns_input.txt" 2>/dev/null
+            
+            # FIXED PARSING: Extract domain from first column, remove trailing dot
+            if [ -s "$tmp_dir/massdns_raw.txt" ]; then
+                awk '{print $1}' "$tmp_dir/massdns_raw.txt" | sed 's/\.$//' | sort -u \
+                    > "$output_dir/active/massdns_${domain}.txt"
+            else
+                echo "[!] massdns returned no results or failed" >&2
+            fi
         fi
 
         # Shuffledns for comprehensive bruteforce
@@ -798,47 +825,48 @@ subenum() {
     fi
 
     # -------------------------------------------------------------------------
-    # 11. PERMUTATION & MUTATION
+    # 11. PERMUTATION & MUTATION (Fixed & Optimized)
     # -------------------------------------------------------------------------
     if [[ "$run_stage_permutation" == true ]]; then
         echo "[*] Starting Permutation & Mutation..."
+        
+        # FIX: Use ONLY the validated passive list from Step 6.5 as seeds
+        local seed_list="$output_dir/resolved/valid_passive_${domain}.txt"
+        
+        if [ ! -s "$seed_list" ]; then
+             echo "[!] No valid passive domains found to permute. Skipping."
+        else
+            echo "[*] Generating permutations from $(wc -l < "$seed_list") valid seeds..."
+            local perm_list="$tmp_dir/permutation_candidates.txt"
+            : > "$perm_list"
 
-        # Create combined seed list from everything found so far
-        echo "[*] Creating combined seed list for permutations..."
-        local base_domains="$tmp_dir/all_seeds_for_permutation.txt"
-        find "$output_dir" -name "*_${domain}.txt" -type f -exec cat {} + 2>/dev/null \
-            | grep -E "^[a-zA-Z0-9.-]+\.${domain}$" \
-            | sort -u > "$base_domains" \
-            || echo "[!] Failed to create combined seed list" >&2
+            # 1. Generate Permutation List (Don't resolve yet)
+            # Run alterx
+            if command -v alterx >/dev/null 2>&1; then
+                head -5000 "$seed_list" | timeout "$TIMEOUT_PIPELINES" alterx -silent -enrich -limit 100000 >> "$perm_list" 2>/dev/null
+            fi
+            
+            # Run dnsgen
+            if command -v dnsgen >/dev/null 2>&1; then
+                head -2000 "$seed_list" | timeout "$TIMEOUT_PIPELINES" dnsgen - >> "$perm_list" 2>/dev/null
+            fi
 
-        local seed_count
-        seed_count=$(wc -l < "$base_domains" 2>/dev/null || echo "0")
-        echo "[+] Using $seed_count combined subdomains as seeds for permutation"
+            local perm_count
+            perm_count=$(wc -l < "$perm_list" 2>/dev/null || echo "0")
+            echo "[*] Generated $perm_count candidates. Resolving with puredns..."
 
-        # Alterx for fast permutations
-        if command -v alterx >/dev/null 2>&1 && [ -s "$base_domains" ] && [ -f "$RESOLVERS_PATH" ]; then
-            echo "[*] Running alterx permutations..."
-            {
-                head -5000 "$base_domains" | \
-                timeout "$TIMEOUT_PIPELINES" alterx -l - -silent -enrich -limit 50000 \
-                    | timeout "$TIMEOUT_PIPELINES" dnsx -silent -r "$RESOLVERS_PATH" -t "$threads" \
-                    -o "$output_dir/active/alterx_${domain}.txt" 2>/dev/null \
-                    || echo "[!] alterx pipeline failed" >&2
-            } &
+            # 2. Resolve Permutations with Puredns (Fixes wildcard issues & speed)
+            if [ -s "$perm_list" ] && command -v puredns >/dev/null 2>&1; then
+                timeout "$TIMEOUT_RESOLUTION" puredns resolve "$perm_list" -r "$RESOLVERS_PATH" \
+                    --write "$output_dir/active/permutations_resolved_${domain}.txt" \
+                    --rate-limit 2000 --wildcard-tests 10 2>/dev/null
+            elif [ -s "$perm_list" ]; then
+                 # Fallback to dnsx if puredns is missing (less accurate but works)
+                 cat "$perm_list" | timeout "$TIMEOUT_RESOLUTION" dnsx -silent -r "$RESOLVERS_PATH" \
+                    -o "$output_dir/active/permutations_resolved_${domain}.txt" 2>/dev/null
+            fi
         fi
-
-        # Dnsgen + dnsx for intelligent permutations
-        if command -v dnsgen >/dev/null 2>&1 && [ -s "$base_domains" ] && [ -f "$RESOLVERS_PATH" ]; then
-            echo "[*] Running dnsgen permutations..."
-            {
-                head -2000 "$base_domains" | timeout "$TIMEOUT_PIPELINES" dnsgen - | head -100000 \
-                    | timeout "$TIMEOUT_PIPELINES" dnsx -silent -r "$RESOLVERS_PATH" -t "$threads" \
-                    -o "$output_dir/active/dnsgen_${domain}.txt" 2>/dev/null \
-                    || echo "[!] dnsgen pipeline failed" >&2
-            } &
-        fi
-
-        wait
+        
         echo "LAST_COMPLETED_STAGE='permutation'" > "$checkpoint_file"
     fi
 
