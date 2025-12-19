@@ -39,7 +39,7 @@ sudo apt install curl jq dig git libpcap-dev
 ### 2. Go Tools (The Powerhouse)
 
 Ensure you have Go installed, then run:
-Bash
+```
 
 go install -v [github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest](https://github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest)
 go install -v [github.com/projectdiscovery/dnsx/cmd/dnsx@latest](https://github.com/projectdiscovery/dnsx/cmd/dnsx@latest)
@@ -48,7 +48,7 @@ go install -v [github.com/lc/gau/v2/cmd/gau@latest](https://github.com/lc/gau/v2
 go install -v [github.com/d3mondev/puredns/v2@latest](https://github.com/d3mondev/puredns/v2@latest)
 go install -v [github.com/projectdiscovery/alterx/cmd/alterx@latest](https://github.com/projectdiscovery/alterx/cmd/alterx@latest)
 go install -v [github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest](https://github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest)
-
+```
 ### 3. Other Tools
 
     MassDNS: Installation Guide
@@ -62,7 +62,7 @@ go install -v [github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest](htt
 ### 4. Clone EnumerX
 Bash
 
-git clone [https://github.com/MrRockettt/EnumerX.git](https://github.com/MrRockettt/EnumerX.git)
+git clone [https://github.com/0xSalm0n/EnumerX.git](https://github.com/0xSalm0n/EnumerX.git)
 cd EnumerX
 chmod +x enumerx.sh
 
@@ -145,3 +145,4 @@ This tool is created for educational purposes and authorized security assessment
 Distributed under the MIT License. See LICENSE for more information.
 
 Author: Salmon Kumar / 0xSalm0n
+
